@@ -28,84 +28,73 @@ public class SolucaoForense implements AnaliseForenseAvancada {
     }
 
     @Override
-    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException {
-        if (recursoInicial.equals(recursoAlvo)) {
-            try (var br = new BufferedReader(new FileReader(caminhoArquivo))) {
-                br.readLine();
-                String linha;
-                while ((linha = br.readLine()) != null) {
-                    String[] col = linha.split(",", -1);
-                    if (col.length >= 5 && col[4].equals(recursoInicial)) {
-                        return Optional.of(List.of(recursoInicial));
-                    }
-                }
-            }
-            return Optional.empty();
-        }
-        
+    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException { 
+        boolean recursoExiste = false;
         Map<String, List<String>> grafo = new HashMap<>();
-        Map<String, List<String[]>> porSessao = new HashMap<>();
 
-        try (var br = new BufferedReader(new FileReader(caminhoArquivo))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
             br.readLine();
             String linha;
+            String sessaoAtual = null;
+            String ultimoRecurso = null;
+
             while ((linha = br.readLine()) != null) {
                 String[] col = linha.split(",", -1);
                 if (col.length < 5) continue;
-                String sessionId = col[2];
-                porSessao.computeIfAbsent(sessionId, k -> new ArrayList<>()).add(col);
+
+                String sessao = col[2];
+                String recurso = col[4];
+                
+                if (recurso.equals(recursoInicial)) recursoExiste = true;
+                if (!sessao.equals(sessaoAtual)) {
+                    sessaoAtual = sessao;
+                    ultimoRecurso = recurso;
+                    continue;
+                }
+
+                grafo.computeIfAbsent(ultimoRecurso, k -> new ArrayList<>()).add(recurso);
+                ultimoRecurso = recurso;
             }
         }
 
-        for (var entrada : porSessao.entrySet()) {
-            List<String[]> logs = entrada.getValue();
-
-            if (logs.size() < 2) continue;
-            for (int i = 0; i < logs.size() - 1; i++) {
-                String recursoA = logs.get(i)[4];
-                String recursoB = logs.get(i + 1)[4];
-                grafo.computeIfAbsent(recursoA, k -> new ArrayList<>()).add(recursoB);
-            }
+        if (recursoInicial.equals(recursoAlvo)) {
+            if (recursoExiste)
+                return Optional.of(List.of(recursoInicial));
+            else
+                return Optional.empty();
         }
 
-        //BFS
-        if (!grafo.containsKey(recursoInicial)) return Optional.empty();
-        Queue<String> fila = new LinkedList<>();
+        if (!grafo.containsKey(recursoInicial))
+            return Optional.empty();
+
+        // BFS
+        ArrayDeque<String> fila = new ArrayDeque<>();
         fila.add(recursoInicial);
-
         Map<String, String> predecessor = new HashMap<>();
         Set<String> visitado = new HashSet<>();
         visitado.add(recursoInicial);
-        boolean encontrado = false;
 
         while (!fila.isEmpty()) {
             String atual = fila.poll();
-
-            if (!grafo.containsKey(atual)) continue;
-            for (String vizinho : grafo.get(atual)) {
-                if (!visitado.contains(vizinho)) {
-                    visitado.add(vizinho);
-                    predecessor.put(vizinho, atual);
-                    if (vizinho.equals(recursoAlvo)) {
-                        encontrado = true;
-                        break;
+            List<String> vizinhos = grafo.get(atual);
+            if (vizinhos == null) continue;
+            for (String nxt : vizinhos) {
+                if (!visitado.add(nxt)) continue;
+                predecessor.put(nxt, atual);
+                if (nxt.equals(recursoAlvo)) {
+                    ArrayList<String> caminho = new ArrayList<>();
+                    String p = nxt;
+                    while (p != null) {
+                        caminho.add(p);
+                        p = predecessor.get(p);
                     }
-                    fila.add(vizinho);
+                    
+                    Collections.reverse(caminho);
+                    return Optional.of(caminho);
                 }
+                fila.add(nxt);
             }
-            if (encontrado) break;
-
         }
-
-        if (!encontrado) return Optional.empty();
-        List<String> caminho = new ArrayList<>();
-        String atual = recursoAlvo;
-        while (atual != null) {
-            caminho.add(atual);
-            atual = predecessor.get(atual);
-        }
-
-        Collections.reverse(caminho); 
-        return Optional.of(caminho);
+        return Optional.empty();
     }
 }
