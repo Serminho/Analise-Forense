@@ -1,7 +1,4 @@
-package br.edu.icev.aed.solucao;
-
-import br.edu.icev.aed.forense.AnaliseForenseAvancada;
-import br.edu.icev.aed.forense.Alerta;
+package br.edu.icev.aed.forense;
 
 import java.io.IOException;
 import java.util.*;
