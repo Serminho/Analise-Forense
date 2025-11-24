@@ -26,18 +26,14 @@ echo "☕ Usando Java:"
 java -version
 
 # Compilar código fonte
-# Verificar se existe código fonte
 if [ ! -d "$SRC_DIR" ]; then
     echo "❌ Diretório src/ não encontrado!"
     exit 1
 fi
 
-# Compilar todas as classes Java
-find "$SRC_DIR" -name "*.java" -print0 | while IFS= read -r -d '' file; do
-    echo "  📝 $file"
-done
+echo "📦 Compilando arquivos .java..."
 
-javac -d "$BUILD_DIR" -cp "$SRC_DIR" $(find "$SRC_DIR" -name "*.java")
+javac -d "$BUILD_DIR" -cp "$LIB_DIR/*" $(find "$SRC_DIR" -name "*.java")
 
 if [ $? -ne 0 ]; then
     echo "❌ Falha na compilação!"
@@ -56,10 +52,14 @@ cd "$BUILD_DIR"
 jar cf "../$JAR_NAME" .
 cd "$PROJECT_DIR"
 
-if [ $? -ne 0 ]; then
-    echo "❌ Falha ao criar JAR!"
-    exit 1
-fi
+echo "➕ Incorporando analise-forense-aed.jar ao JAR final..."
+cd "$LIB_DIR"
+jar xf analise-forense-aed.jar
+cd "$PROJECT_DIR"
+
+cd "$BUILD_DIR"
+jar uf "../$JAR_NAME" br
+cd "$PROJECT_DIR"
 
 ls -lh "$JAR_NAME"
 jar tf "$JAR_NAME" | head -10
@@ -74,4 +74,3 @@ else
     echo "❌ JAR inválido!"
     exit 1
 fi
-

@@ -1,22 +1,9 @@
-package br.edu.icev.aed.solucao;
+package br.edu.icev.aed.forense;
 
-import br.edu.icev.aed.forense.AnaliseForenseAvancada;
-import br.edu.icev.aed.forense.Alerta;
-
+import java.util.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
-import java.util.TreeSet;
 
 public class SolucaoForense implements AnaliseForenseAvancada {
 
