@@ -3,63 +3,101 @@ package br.edu.icev.aed.solucao;
 import br.edu.icev.aed.forense.AnaliseForenseAvancada;
 import br.edu.icev.aed.forense.Alerta;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.TreeSet;
 
 public class SolucaoForense implements AnaliseForenseAvancada {
 
-    private List<String[]> ler(String caminho) throws IOException {
-        var linhas = new ArrayList<String[]>();
-        try (var br = new BufferedReader(new FileReader(caminho))) {
-            br.readLine();
-            String l;
-            while ((l = br.readLine()) != null) {
-                String[] c = l.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
-                for (int i = 0; i < c.length; i++) c[i] = c[i].replace("\"", "").trim();
-                if (c.length >= 6) linhas.add(c);
+    private List<String[]> carregarLogsDoArquivo(String caminhoArquivo) throws IOException {
+        List<String[]> todosLogs = new ArrayList<>();
+        try (BufferedReader leitor = new BufferedReader(new FileReader(caminhoArquivo))) {
+            leitor.readLine();
+            String linhaAtual;
+            while ((linhaAtual = leitor.readLine()) != null) {
+                String[] campos = linhaAtual.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
+                for (int i = 0; i < campos.length; i++) {
+                    campos[i] = campos[i].replace("\"", "").trim();
+                }
+                if (campos.length >= 7) {
+                    todosLogs.add(campos);
+                }
             }
         }
-        return linhas;
+        return todosLogs;
     }
 
- @Override
+    @Override
     public Set<String> encontrarSessoesInvalidas(String caminhoArquivoCsv) throws IOException {
-        var logs = ler(caminhoArquivoCsv);
-        var cont = new HashMap<String, Integer>();
+        List<String[]> logs = carregarLogsDoArquivo(caminhoArquivoCsv);
+        Map<String, Deque<String>> pilhaDeSessoesPorUsuario = new HashMap<>();
+        Set<String> sessoesConsideradasInvalidas = new HashSet<>();
 
-        for (String[] log : logs) {
-            String sessao = log[1];
-            String acao   = log[3];
+        for (String[] registro : logs) {
+            String idUsuario = registro[1];
+            String idSessao = registro[2];
+            String tipoAcao = registro[3];
 
-            cont.putIfAbsent(sessao, 0);
-            if ("LOGIN".equals(acao)) {
-                cont.put(sessao, cont.get(sessao) + 1);
-            } else if ("LOGOUT".equals(acao) || "SESSION_EXPIRED".equals(acao)) {
-                int v = cont.get(sessao);
-                if (v > 0) cont.put(sessao, v - 1);
+            Deque<String> pilhaDoUsuario = pilhaDeSessoesPorUsuario
+                    .computeIfAbsent(idUsuario, k -> new ArrayDeque<>());
+
+            if ("LOGIN".equals(tipoAcao)) {
+                if (!pilhaDoUsuario.isEmpty()) {
+                    sessoesConsideradasInvalidas.add(idSessao);
+                }
+                pilhaDoUsuario.push(idSessao);
+            }
+            else if ("LOGOUT".equals(tipoAcao) || "SESSION_EXPIRED".equals(tipoAcao)) {
+                if (pilhaDoUsuario.isEmpty()) {
+                    sessoesConsideradasInvalidas.add(idSessao);
+                } else {
+                    String sessaoAbertaAtual = pilhaDoUsuario.pop();
+                    if (!sessaoAbertaAtual.equals(idSessao)) {
+                        sessoesConsideradasInvalidas.add(idSessao);
+                        sessoesConsideradasInvalidas.add(sessaoAbertaAtual);
+                        pilhaDoUsuario.push(sessaoAbertaAtual);
+                    }
+                }
             }
         }
 
-        var invalidas = new TreeSet<String>();
-        for (var e : cont.entrySet()) {
-            if (e.getValue() > 0) invalidas.add(e.getKey());
+        for (Deque<String> pilhaRestante : pilhaDeSessoesPorUsuario.values()) {
+            sessoesConsideradasInvalidas.addAll(pilhaRestante);
         }
-        return invalidas;
+
+        return new TreeSet<>(sessoesConsideradasInvalidas);
     }
 
     @Override
     public List<String> reconstruirLinhaTempo(String caminhoArquivoCsv, String sessionId) throws IOException {
-        var logs = ler(caminhoArquivoCsv);
-        var resultado = new ArrayList<String>();
+        List<String[]> logs = carregarLogsDoArquivo(caminhoArquivoCsv);
+        Queue<String> filaDeAcoesDaSessao = new LinkedList<>();
 
-        for (String[] log : logs) {
-            if (sessionId.equals(log[1])) {
-                resultado.add(log[3] + " -> " + log[4]);
+        for (String[] registro : logs) {
+            if (sessionId.equals(registro[2])) {
+                filaDeAcoesDaSessao.offer(registro[3]);
             }
         }
-        return resultado;
+
+        List<String> linhaDoTempoFinal = new ArrayList<>();
+        while (!filaDeAcoesDaSessao.isEmpty()) {
+            linhaDoTempoFinal.add(filaDeAcoesDaSessao.poll());
+        }
+
+        return linhaDoTempoFinal;
     }
-    
+
     @Override
     public List<Alerta> priorizarAlertas(String caminhoArquivo, int n) throws IOException {
         return Collections.emptyList();
