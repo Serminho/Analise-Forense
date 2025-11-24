@@ -74,3 +74,4 @@ else
     echo "❌ JAR inválido!"
     exit 1
 fi
+
