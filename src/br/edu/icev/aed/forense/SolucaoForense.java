@@ -23,10 +23,17 @@ public class SolucaoForense implements AnaliseForenseAvancada {
                 String sessao = col[2];
                 String acao = col[3];
 
-                Deque<String> pilha = pilhas.computeIfAbsent(user, k -> new ArrayDeque<>());
+                Deque<String> pilha = pilhas.get(user);
+                if (pilha == null) {
+                    pilha = new ArrayDeque<>(4);
+                    pilhas.put(user, pilha);
+                }
+                char c = acao.charAt(0);
 
-                if (acao.equals("LOGIN")) {
-                    if (!pilha.isEmpty()) invalidas.add(sessao);
+                if (c == 'L' && acao.equals("LOGIN")) {
+                    if (!pilha.isEmpty()) {
+                        invalidas.add(sessao);
+                    }
                     pilha.push(sessao);
                 }
                 else {
@@ -43,8 +50,9 @@ public class SolucaoForense implements AnaliseForenseAvancada {
             }
         }
 
-        for (Deque<String> p : pilhas.values())
-        invalidas.addAll(p);
+        for (Deque<String> p : pilhas.values()) {
+            invalidas.addAll(p);
+        }
         return new TreeSet<>(invalidas);
     }
 
