@@ -4,10 +4,10 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
-import java.io.BufferedReader;
-import java.io.FileReader;
 
 public class SolucaoForense implements AnaliseForenseAvancada {
+    private volatile List<Alerta> alertasCache = null;
+    private volatile String cachePath = null;
 
     @Override
     public Set<String> encontrarSessoesInvalidas(String caminhoArquivo) throws IOException {
@@ -18,12 +18,13 @@ public class SolucaoForense implements AnaliseForenseAvancada {
             br.readLine();
             String linha;
             while ((linha = br.readLine()) != null) {
-
                 String[] col = linha.split(",", -1);
+                if (col.length < 4) continue;
 
-                String user = col[1];
-                String sessao = col[2];
-                String acao = col[3];
+                String user = col[1].trim();
+                String sessao = col[2].trim();
+                String acao = col[3].trim();
+                if (user.isEmpty() || sessao.isEmpty() || acao.isEmpty()) continue;
 
                 Deque<String> pilha = pilhas.get(user);
                 if (pilha == null) {
@@ -31,14 +32,12 @@ public class SolucaoForense implements AnaliseForenseAvancada {
                     pilhas.put(user, pilha);
                 }
                 char c = acao.charAt(0);
-
-                if (c == 'L' && acao.equals("LOGIN")) {
+                if (c == 'L' && "LOGIN".equals(acao)) {
                     if (!pilha.isEmpty()) {
                         invalidas.add(sessao);
                     }
                     pilha.push(sessao);
-                }
-                else {
+                } else if ("LOGOUT".equals(acao) || "SESSION_EXPIRED".equals(acao)) {
                     if (pilha.isEmpty()) {
                         invalidas.add(sessao);
                     } else {
@@ -48,6 +47,7 @@ public class SolucaoForense implements AnaliseForenseAvancada {
                             invalidas.add(sessao);
                         }
                     }
+                } else {
                 }
             }
         }
@@ -61,14 +61,15 @@ public class SolucaoForense implements AnaliseForenseAvancada {
     @Override
     public List<String> reconstruirLinhaTempo(String caminhoArquivoCsv, String sessionId) throws IOException {
         List<String> linha = new ArrayList<>(32);
+        if (sessionId == null) return linha;
         try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivoCsv))) {
             br.readLine();
             String row;
-
             while ((row = br.readLine()) != null) {
                 String[] col = row.split(",", -1);
-                if (sessionId.equals(col[2])) {
-                    linha.add(col[3]);
+                if (col.length < 4) continue;
+                if (sessionId.equals(col[2].trim())) {
+                    linha.add(col[3].trim());
                 }
             }
         }
@@ -79,68 +80,96 @@ public class SolucaoForense implements AnaliseForenseAvancada {
     @Override
     public List<Alerta> priorizarAlertas(String caminhoArquivo, int n) throws IOException {
         if (n <= 0) return Collections.emptyList();
-        List<Alerta> alertas = lerAlertasDoArquivo(caminhoArquivo);
-        if (alertas.isEmpty()) return Collections.emptyList();
-        PriorityQueue<Alerta> pq =
-                new PriorityQueue<>(Comparator.comparingInt(Alerta::getSeverityLevel).reversed());
-        pq.addAll(alertas);
-        List<Alerta> resultado = new ArrayList<>(n);
+        List<Alerta> all = getAlertasCached(caminhoArquivo);
+        if (all.isEmpty()) return Collections.emptyList();
+        Comparator<Alerta> keepComparator = Comparator
+                .comparingInt(Alerta::getSeverityLevel)
+                .thenComparingLong(Alerta::getBytesTransferred);
 
-        for (int i = 0; i < n && !pq.isEmpty(); i++)
-            resultado.add(pq.poll());
+        PriorityQueue<Alerta> minHeap = new PriorityQueue<>(Math.min(n, all.size()), keepComparator);
+
+        for (Alerta a : all) {
+            if (minHeap.size() < n) {
+                minHeap.offer(a);
+            } else if (keepComparator.compare(a, minHeap.peek()) > 0) {
+                minHeap.poll();
+                minHeap.offer(a);
+            }
+        }
+        List<Alerta> resultado = new ArrayList<>(minHeap);
+        resultado.sort(Comparator
+                .comparingInt(Alerta::getSeverityLevel).reversed()
+                .thenComparingLong(Alerta::getBytesTransferred).reversed()
+                .thenComparingLong(Alerta::getTimestamp)); // tie-breaker stable
         return resultado;
     }
 
     @Override
     public Map<Long, Long> encontrarPicosTransferencia(String caminhoArquivo) throws IOException {
-        List<Alerta> alertas = lerAlertasDoArquivo(caminhoArquivo);
+        List<Alerta> alertas = getAlertasCached(caminhoArquivo);
         int size = alertas.size();
         if (size == 0) return Collections.emptyMap();
 
         Map<Long, Long> resultado = new HashMap<>();
-        ArrayDeque<Alerta> stack = new ArrayDeque<>();
+        ArrayDeque<Alerta> stack = new ArrayDeque<>(64);
         for (int i = size - 1; i >= 0; i--) {
-
             Alerta atual = alertas.get(i);
             long bytes = atual.getBytesTransferred();
 
-            while (!stack.isEmpty() && stack.peek().getBytesTransferred() <= bytes)
+            while (!stack.isEmpty() && stack.peek().getBytesTransferred() <= bytes) {
                 stack.pop();
-            if (!stack.isEmpty())
+            }
+            if (!stack.isEmpty()) {
                 resultado.put(atual.getTimestamp(), stack.peek().getTimestamp());
-
+            }
             stack.push(atual);
         }
 
         return resultado;
     }
-    
+    private List<Alerta> getAlertasCached(String caminhoArquivo) throws IOException {
+        if (caminhoArquivo == null) return Collections.emptyList();
+
+        if (caminhoArquivo.equals(cachePath) && alertasCache != null) {
+            return alertasCache;
+        }
+
+        synchronized (this) {
+            if (caminhoArquivo.equals(cachePath) && alertasCache != null) {
+                return alertasCache;
+            }
+            List<Alerta> parsed = lerAlertasDoArquivo(caminhoArquivo);
+            alertasCache = parsed;
+            cachePath = caminhoArquivo;
+            return parsed;
+        }
+    }
+
     private List<Alerta> lerAlertasDoArquivo(String caminhoArquivo) throws IOException {
-        List<Alerta> lista = new ArrayList<>();
+        List<Alerta> lista = new ArrayList<>(2048);
 
         try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
             br.readLine();
             String linha;
             while ((linha = br.readLine()) != null) {
-
                 String[] p = linha.split(",", -1);
                 if (p.length < 7) continue;
+                String tsS = p[0].trim();
+                String user = p[1].trim();
+                String session = p[2].trim();
+                String action = p[3].trim();
+                String resource = p[4].trim();
+                String sevS = p[5].trim();
+                String bytesS = p[6].trim();
+
+                if (tsS.isEmpty() || user.isEmpty() || session.isEmpty()) continue;
                 try {
-                    long ts = Long.parseLong(p[0].trim());
-                    int sev = Integer.parseInt(p[5].trim());
-                    long bytes = Long.parseLong(p[6].trim());
+                    long ts = Long.parseLong(tsS);
+                    int sev = sevS.isEmpty() ? 0 : Integer.parseInt(sevS);
+                    long bytes = bytesS.isEmpty() ? 0L : Long.parseLong(bytesS);
 
-                    lista.add(new Alerta(
-                            ts,
-                            p[1].trim(),
-                            p[2].trim(),
-                            p[3].trim(),
-                            p[4].trim(),
-                            sev,
-                            bytes
-                    ));
-
-                } catch (NumberFormatException ignored) {
+                    lista.add(new Alerta(ts, user, session, action, resource, sev, bytes));
+                } catch (NumberFormatException ex) {
                 }
             }
         }
@@ -148,7 +177,7 @@ public class SolucaoForense implements AnaliseForenseAvancada {
     }
 
     @Override
-    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException { 
+    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException {
         boolean recursoExiste = false;
         Map<String, List<String>> grafo = new HashMap<>();
 
@@ -164,7 +193,7 @@ public class SolucaoForense implements AnaliseForenseAvancada {
 
                 String sessao = col[2];
                 String recurso = col[4];
-                
+
                 if (recurso.equals(recursoInicial)) recursoExiste = true;
                 if (!sessao.equals(sessaoAtual)) {
                     sessaoAtual = sessao;
@@ -187,7 +216,6 @@ public class SolucaoForense implements AnaliseForenseAvancada {
         if (!grafo.containsKey(recursoInicial))
             return Optional.empty();
 
-        // BFS
         ArrayDeque<String> fila = new ArrayDeque<>();
         fila.add(recursoInicial);
         Map<String, String> predecessor = new HashMap<>();
@@ -208,7 +236,7 @@ public class SolucaoForense implements AnaliseForenseAvancada {
                         caminho.add(p);
                         p = predecessor.get(p);
                     }
-                    
+
                     Collections.reverse(caminho);
                     return Optional.of(caminho);
                 }
