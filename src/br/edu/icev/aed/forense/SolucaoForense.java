@@ -19,83 +19,74 @@ public class SolucaoForense implements AnaliseForenseAvancada {
 
     @Override
     public List<Alerta> priorizarAlertas(String caminhoArquivo, int n) throws IOException {
-
-        List<Alerta> resultado = new ArrayList<>();
-
-        if (n <= 0) {
-            return resultado;
-        }
-
-        Comparator<Alerta> comparatorAlertas = Comparator.comparingInt(Alerta::getSeverityLevel).reversed();
-        PriorityQueue<Alerta> filaDePrioridade = new PriorityQueue<>(comparatorAlertas);
-
+        if (n <= 0) return Collections.emptyList();
         List<Alerta> alertas = lerAlertasDoArquivo(caminhoArquivo);
-        filaDePrioridade.addAll(alertas);
+        if (alertas.isEmpty()) return Collections.emptyList();
+        PriorityQueue<Alerta> pq =
+                new PriorityQueue<>(Comparator.comparingInt(Alerta::getSeverityLevel).reversed());
+        pq.addAll(alertas);
+        List<Alerta> resultado = new ArrayList<>(n);
 
-        for (int i = 0; i < n && !filaDePrioridade.isEmpty(); i++) {
-            resultado.add(filaDePrioridade.poll());
-        }
-
+        for (int i = 0; i < n && !pq.isEmpty(); i++)
+            resultado.add(pq.poll());
         return resultado;
     }
-
-
 
     @Override
     public Map<Long, Long> encontrarPicosTransferencia(String caminhoArquivo) throws IOException {
-
         List<Alerta> alertas = lerAlertasDoArquivo(caminhoArquivo);
-
-        if (alertas == null || alertas.isEmpty()) {
-            return new HashMap<>();
-        }
+        int size = alertas.size();
+        if (size == 0) return Collections.emptyMap();
 
         Map<Long, Long> resultado = new HashMap<>();
+        ArrayDeque<Alerta> stack = new ArrayDeque<>();
+        for (int i = size - 1; i >= 0; i--) {
 
-        Stack<Alerta> stack = new Stack<>();
+            Alerta atual = alertas.get(i);
+            long bytes = atual.getBytesTransferred();
 
-        for (int i = alertas.size() - 1; i >= 0; i--) {
-            Alerta eventoAtual = alertas.get(i);
-
-            while (!stack.isEmpty() && stack.peek().getBytesTransferred() <= eventoAtual.getBytesTransferred()) {
+            while (!stack.isEmpty() && stack.peek().getBytesTransferred() <= bytes)
                 stack.pop();
-            }
-            if (!stack.isEmpty()) {
-                resultado.put(eventoAtual.getTimestamp(), stack.peek().getTimestamp());
-            }
+            if (!stack.isEmpty())
+                resultado.put(atual.getTimestamp(), stack.peek().getTimestamp());
 
-            stack.push(eventoAtual);
+            stack.push(atual);
         }
 
         return resultado;
     }
-private List<Alerta> lerAlertasDoArquivo(String caminhoArquivo) throws IOException {
-    List<Alerta> lista = new ArrayList<>();
+    
+    private List<Alerta> lerAlertasDoArquivo(String caminhoArquivo) throws IOException {
+        List<Alerta> lista = new ArrayList<>();
 
-    try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
-        String linha;
-        while ((linha = br.readLine()) != null) {
+        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
+            br.readLine();
+            String linha;
+            while ((linha = br.readLine()) != null) {
 
-            String[] partes = linha.split(";"); //talvez precise mudar daqui esse ponto e vírgula
+                String[] p = linha.split(",", -1);
+                if (p.length < 7) continue;
+                try {
+                    long ts = Long.parseLong(p[0].trim());
+                    int sev = Integer.parseInt(p[5].trim());
+                    long bytes = Long.parseLong(p[6].trim());
 
-            if (partes.length != 7) {
-                continue;
+                    lista.add(new Alerta(
+                            ts,
+                            p[1].trim(),
+                            p[2].trim(),
+                            p[3].trim(),
+                            p[4].trim(),
+                            sev,
+                            bytes
+                    ));
+
+                } catch (NumberFormatException ignored) {
+                }
             }
-
-            long timestamp = Long.parseLong(partes[0]);
-            String userId = partes[1];
-            String sessionId = partes[2];
-            String actionType = partes[3];
-            String targetResource = partes[4];
-            int severity = Integer.parseInt(partes[5]);
-            long bytesTransferred = Long.parseLong(partes[6]);
-
-            Alerta alerta = new Alerta(timestamp, userId, sessionId, actionType, targetResource, severity, bytesTransferred);
-            lista.add(alerta);
         }
+        return lista;
     }
-    return lista;
-}
 
     @Override
     public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException {
