@@ -1,9 +1,9 @@
 package br.edu.icev.aed.forense;
 
-import java.util.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.*;
 
 public class SolucaoForense implements AnaliseForenseAvancada {
 
@@ -85,7 +85,73 @@ public class SolucaoForense implements AnaliseForenseAvancada {
     }
 
     @Override
-    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException {
+    public Optional<List<String>> rastrearContaminacao(String caminhoArquivo, String recursoInicial, String recursoAlvo) throws IOException { 
+        boolean recursoExiste = false;
+        Map<String, List<String>> grafo = new HashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(caminhoArquivo))) {
+            br.readLine();
+            String linha;
+            String sessaoAtual = null;
+            String ultimoRecurso = null;
+
+            while ((linha = br.readLine()) != null) {
+                String[] col = linha.split(",", -1);
+                if (col.length < 5) continue;
+
+                String sessao = col[2];
+                String recurso = col[4];
+                
+                if (recurso.equals(recursoInicial)) recursoExiste = true;
+                if (!sessao.equals(sessaoAtual)) {
+                    sessaoAtual = sessao;
+                    ultimoRecurso = recurso;
+                    continue;
+                }
+
+                grafo.computeIfAbsent(ultimoRecurso, k -> new ArrayList<>()).add(recurso);
+                ultimoRecurso = recurso;
+            }
+        }
+
+        if (recursoInicial.equals(recursoAlvo)) {
+            if (recursoExiste)
+                return Optional.of(List.of(recursoInicial));
+            else
+                return Optional.empty();
+        }
+
+        if (!grafo.containsKey(recursoInicial))
+            return Optional.empty();
+
+        // BFS
+        ArrayDeque<String> fila = new ArrayDeque<>();
+        fila.add(recursoInicial);
+        Map<String, String> predecessor = new HashMap<>();
+        Set<String> visitado = new HashSet<>();
+        visitado.add(recursoInicial);
+
+        while (!fila.isEmpty()) {
+            String atual = fila.poll();
+            List<String> vizinhos = grafo.get(atual);
+            if (vizinhos == null) continue;
+            for (String nxt : vizinhos) {
+                if (!visitado.add(nxt)) continue;
+                predecessor.put(nxt, atual);
+                if (nxt.equals(recursoAlvo)) {
+                    ArrayList<String> caminho = new ArrayList<>();
+                    String p = nxt;
+                    while (p != null) {
+                        caminho.add(p);
+                        p = predecessor.get(p);
+                    }
+                    
+                    Collections.reverse(caminho);
+                    return Optional.of(caminho);
+                }
+                fila.add(nxt);
+            }
+        }
         return Optional.empty();
     }
 }
